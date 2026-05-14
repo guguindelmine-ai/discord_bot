@@ -655,6 +655,9 @@ class HelpSelect(discord.ui.Select):
                 "Let's keep your server safe and organized! Here are the tools I use to protect the community:\n\n"
                 f"**Logging:**\n"
                 f"`{prefix}setlogchannel <#ch>` - Tell me where to log server events\n\n"
+                f"**Bypass & Whitelist:**\n"
+                f"`{prefix}setbypass <@user/role>` - Give a user/role access to **EVERY** command (bypass all limits)\n"
+                f"`{prefix}whitelist <add/remove>` - Allow specific users/admins to bypass swear filters\n\n"
                 f"**Moderation Tools:**\n"
                 f"`{prefix}purge <num>` - Clean up chat messages\n"
                 f"`{prefix}mute <@user> <clause>` - Apply 1.x tiered punishments\n"
@@ -664,12 +667,19 @@ class HelpSelect(discord.ui.Select):
                 f"`{prefix}unquarantine <@user>` - Release a user back to the server\n\n"
                 f"**Automated Protection:**\n"
                 f"`{prefix}togglefilter` - Turn the swear detection system on/off\n"
-                f"`{prefix}addscam <link>` / `{prefix}addswear <word>` - Update my blacklist\n"
-                f"`{prefix}whitelist <add/remove>` - Allow trusted users to bypass filters\n\n"
-                f"**Flavor Moderation:**\n"
+                f"`{prefix}addscam <link>` / `{prefix}addswear <word>` - Update my blacklist\n\n"
+                f"**Flavor & Customization:**\n"
+                f"`{prefix}setgif <action> <url>` - Change the GIF for `!annihilate`, `!blast`, etc.\n"
                 f"`{prefix}blast <@user>` - 10m mute with a boom\n"
-                f"`{prefix}rct` / `rcs` / `unmute` <@user> - Recovery/Unmute\n"
-                f"`{prefix}annihilate <@user>` - Permanent ban with style"
+                f"`{prefix}unmute` / `!rct` <@user> - Unmute or recover a user\n"
+                f"`{prefix}annihilate <@user>` - Permanent ban with custom style\n\n"
+                f"**Advanced Config (Times & Limits):**\n"
+                f"`{prefix}viewconfig` - **See all your current tiers, times, and limits**\n"
+                f"`{prefix}swearlist` - See all blacklisted swear words\n"
+                f"`{prefix}setcooldown <cmd> <time>` - Set time for `work`, `crime`, `daily`, etc.\n"
+                f"`{prefix}setswearpenalty <time>` - Set mute duration for swear filter\n"
+                f"`{prefix}settier <tier> <time>` - Set duration for tiers (1.1, 1.2, etc.)\n"
+                f"`{prefix}setswearthreshold <action> <count>` - Set warnings before punishment"
             )
             await interaction.response.edit_message(embed=embed, view=SetupGuideView())
             return
@@ -2706,6 +2716,45 @@ async def set_bypass_cmd(ctx: commands.Context, target: str):
             return await ctx.send(f"❌ Role **{role.name}** removed from global command bypass.")
     except:
         return await ctx.send("❌ Please mention a valid user or role.")
+
+@bot.command(name="viewconfig", aliases=["showconfig", "tiers"])
+@is_authorized()
+async def view_config_cmd(ctx: commands.Context):
+    """View all current punishment tiers, cooldowns, and thresholds."""
+    cfg = load_config()
+    from bot_functions import format_duration
+    
+    embed = discord.Embed(title="⚙️ Paradox Bot | Server Configuration", color=0x9B59B6, timestamp=discord.utils.utcnow())
+    
+    # ── Tiers ──
+    tiers = cfg.get("PUNISHMENT_TIERS", {
+        "1.1": {"action": "mute", "duration": 10, "label": "Rule 1.1 (Minor)"},
+        "1.2": {"action": "mute", "duration": 30, "label": "Rule 1.2 (Standard)"},
+        "1.3": {"action": "mute", "duration": 60, "label": "Rule 1.3 (Serious)"},
+        "1.4": {"action": "quarantine", "duration": 1440, "label": "Rule 1.4 (Severe)"},
+        "1.5": {"action": "quarantine", "duration": 10080, "label": "Rule 1.5 (Critical)"}
+    })
+    tier_text = ""
+    for k, v in tiers.items():
+        tier_text += f"**{k}**: {v['action'].capitalize()} for {v['duration']}m ({v['label']})\n"
+    embed.add_field(name="⚖️ Punishment Tiers", value=tier_text or "None", inline=False)
+    
+    # ── Cooldowns ──
+    cooldowns = cfg.get("COMMAND_COOLDOWNS", {"daily": 86400, "work": 300, "crime": 60, "heist": 300, "steal": 300, "casino": 5})
+    cd_text = ""
+    for k, v in cooldowns.items():
+        cd_text += f"**!{k}**: {format_duration(v)}\n"
+    embed.add_field(name="⏳ Economy Cooldowns", value=cd_text or "None", inline=True)
+    
+    # ── Swear Thresholds ──
+    thresholds = cfg.get("SWEAR_THRESHOLDS", {"silent": 1, "warn1": 2, "warn2": 3, "mute": 4, "quarantine": 8})
+    th_text = ""
+    for k, v in thresholds.items():
+        th_text += f"**{k.capitalize()}**: {v} infractions\n"
+    embed.add_field(name="🚫 Swear Thresholds", value=th_text or "None", inline=True)
+    
+    embed.set_footer(text="Modify these using the !set commands in help.")
+    await ctx.send(embed=embed)
 
 @bot.command(name="setswearthreshold")
 @is_authorized()
