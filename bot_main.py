@@ -599,11 +599,17 @@ class HelpSelect(discord.ui.Select):
         ]
 
         if is_admin:
-            options.insert(0, discord.SelectOption(label="Setup & Config", description="Greetings, Roles & Channels", emoji="⚙️", value="setup"))
-            options.insert(1, discord.SelectOption(label="Tickets & Apps", description="Support, Macros & Application setup", emoji="🎟️", value="tickets"))
-            options.insert(2, discord.SelectOption(label="Moderation & Security", description="Moderation tools & Filter system", emoji="🛡️", value="security"))
+            options.insert(0, discord.SelectOption(label="Setup Guide", description="Step-by-step server guide", emoji="📖", value="setup_guide"))
+            options.insert(1, discord.SelectOption(label="Setup & Config", description="Greetings, Roles & Channels", emoji="⚙️", value="setup"))
+            options.insert(2, discord.SelectOption(label="Tickets & Apps", description="Support, Macros & Application setup", emoji="🎟️", value="tickets"))
+            options.insert(3, discord.SelectOption(label="Moderation & Security", description="Moderation tools & Filter system", emoji="🛡️", value="security"))
             options.append(discord.SelectOption(label="Server Boost", description="Rewards, Logs & Special Roles", emoji="💎", value="boost"))
-        super().__init__(placeholder="Select a category to view commands...", options=options)
+        super().__init__(
+            placeholder="Explore Paradox's features here...", 
+            options=options,
+            min_values=1,
+            max_values=1
+        )
 
     async def callback(self, interaction: discord.Interaction):
         cat = self.values[0]
@@ -611,7 +617,28 @@ class HelpSelect(discord.ui.Select):
         
         embed = discord.Embed(color=0x9B59B6, timestamp=discord.utils.utcnow())
         
-        if cat == "setup":
+        if cat == "setup_guide":
+            embed.title = "📖 Paradox Bot | Setup Guide"
+            embed.description = (
+                "Welcome to the official setup guide! Follow these steps to get your server running perfectly:\n\n"
+                "### 1️⃣ Core Greetings\n"
+                f"• Set where I talk: `{prefix}setwelcomechannel #channel`\n"
+                f"• Customize the join message: `{prefix}setwelcome Welcome {{mention}}!`\n"
+                f"• Test the result: `{prefix}testjoin`\n\n"
+                "### 2️⃣ Automation\n"
+                f"• Assign a role on join: `{prefix}autorole Member`\n"
+                f"• Enable the swear filter: `{prefix}togglefilter`\n"
+                f"• Choose a log channel: `{prefix}setlogchannel #logs`\n\n"
+                "### 3️⃣ Support & Service\n"
+                f"• Create a ticket panel: `{prefix}setupticket support`\n"
+                f"• Setup carry requests: `{prefix}setupticket carry`\n"
+                f"• Add game options: `{prefix}addgame ALS ⚔️ Anime Last Stand`\n\n"
+                "### 4️⃣ Economy Management\n"
+                f"• Set daily reward: (Managed via DB)\n"
+                f"• Reset economy: `{prefix}reseteco all` (Owner only)\n\n"
+                "**Need more help?** Join our support server or visit our documentation! 💜"
+            )
+        elif cat == "setup":
             embed.title = "⚙️ Server Setup Guide"
             embed.description = (
                 "I'm here to help you build the perfect server! Here are the core settings we can adjust together:\n\n"
@@ -621,6 +648,8 @@ class HelpSelect(discord.ui.Select):
                 f"`{prefix}setgoodbye <msg/channel>` - Configure how we say goodbye\n"
                 f"`{prefix}setimg <welcome/goodbye> <url>` - Add a beautiful banner to greetings\n"
                 f"`{prefix}setcolor <hex>` - Match my greeting colors to your server theme\n"
+                f"`{prefix}setautovc <id>` - Setup a 'Join to Create' voice system\n"
+                f"`{prefix}setconfessionschannel <#ch>` - Set where anonymous confessions go\n"
                 f"`{prefix}setgif <action> <url>` - Set GIFs for social/mod actions\n"
                 f"`{prefix}togglewelcome` - Turn the greeting system on or off\n"
                 f"`{prefix}testjoin` / `{prefix}testleave` - Let's see how the greetings look!\n\n"
@@ -681,12 +710,13 @@ class HelpSelect(discord.ui.Select):
                 f"`{prefix}settier <tier> <time>` - Set duration for tiers (1.1, 1.2, etc.)\n"
                 f"`{prefix}setswearthreshold <action> <count>` - Set warnings before punishment"
             )
-            await interaction.response.edit_message(embed=embed, view=SetupGuideView())
+            await interaction.response.edit_message(embed=embed)
             return
         elif cat == "general":
             embed.title = "📊 General & Statistics"
             embed.description = (
                 "I can provide information and help you engage with your community:\n\n"
+                f"`{prefix}confess <message>` - **Post an anonymous confession (100% private)**\n"
                 f"`{prefix}poll \"Question\" <time>` - Start a community vote\n"
                 f"`{prefix}botinfo` - Check my current health and stats\n"
                 f"`{prefix}serverinfo` - Get a detailed report on this server\n"
@@ -1949,6 +1979,66 @@ async def set_level_channel_cmd(ctx: commands.Context, channel: discord.TextChan
     await save_config_sync(cfg)
     await ctx.send(f"✅ Level-up notifications will now be sent in {channel.mention}")
 
+@bot.command(name="setautovc")
+@commands.has_permissions(administrator=True)
+async def set_autovc_cmd(ctx: commands.Context, channel: discord.VoiceChannel = None):
+    """Set the trigger channel for Auto-VC creation. Usage: !setautovc <#channel> or !setautovc (to disable)"""
+    cfg = load_config()
+    if channel is None:
+        cfg["AUTO_VC_MASTER_ID"] = None
+        await save_config_sync(cfg)
+        return await ctx.send("✅ Auto-VC system has been **disabled**.")
+        
+    cfg["AUTO_VC_MASTER_ID"] = channel.id
+    if "AUTO_VC_COUNT" not in cfg: cfg["AUTO_VC_COUNT"] = 1
+    if "AUTO_VC_CHANNELS" not in cfg: cfg["AUTO_VC_CHANNELS"] = []
+    
+    await save_config_sync(cfg)
+    await ctx.send(f"✅ Auto-VC Master set to **{channel.name}**. Users joining this will get a private room!")
+
+@bot.command(name="setconfessionschannel")
+@commands.has_permissions(administrator=True)
+async def set_confessions_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
+    """Set the channel where anonymous confessions will be posted."""
+    cfg = load_config()
+    cfg["CONFESSIONS_CHANNEL_ID"] = channel.id
+    await save_config_sync(cfg)
+    await ctx.send(f"✅ Confessions will now be posted in {channel.mention}. I will automatically delete the original messages!")
+
+@bot.command(name="confess")
+async def confess_cmd(ctx: commands.Context, *, message: str):
+    """Post an anonymous confession. (Your message is deleted and NOT logged)"""
+    # 1. Delete original message immediately for anonymity
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+        
+    cfg = load_config()
+    confessions_ch_id = cfg.get("CONFESSIONS_CHANNEL_ID")
+    
+    if not confessions_ch_id:
+        # Send ephemeral error if possible, but since we deleted the message we'll send a temporary one
+        error_msg = await ctx.send("❌ Confessions are not set up on this server yet!")
+        return await asyncio.sleep(5) and await error_msg.delete()
+        
+    channel = ctx.guild.get_channel(confessions_ch_id)
+    if not channel:
+        return # Channel might have been deleted
+        
+    # 2. Post the anonymous confession
+    embed = discord.Embed(
+        title="🤫 New Anonymous Confession",
+        description=message,
+        color=0x2F3136, # Sleek dark color
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_footer(text="Paradox Confessions | Total Privacy Guaranteed")
+    
+    await channel.send(embed=embed)
+    
+    # No logging happens here - it's completely silent.
+
 @bot.command(name="setrank")
 @commands.has_permissions(administrator=True)
 async def set_rank_cmd(ctx: commands.Context, level: int, *, name: str):
@@ -2641,42 +2731,59 @@ async def unban_cmd(ctx: commands.Context, *, name: str):
     else:
         await ctx.send(f"❌ Could not find a banned user with the name **{name}**.")
 
+# ──────────────────────────────────────────────────────────────────────────────
+#  🛡️ MODERATION TOOLS & LISTS
+#  Commands for viewing the current state of server security and blacklists.
+# ──────────────────────────────────────────────────────────────────────────────
+
 @bot.command(name="modlist")
 @is_authorized()
 async def modlist_cmd(ctx: commands.Context):
-    """List all banned, quarantined, and timed-out users."""
-    # Banned
+    """
+    Generates a real-time report of all active punishments (Bans, Quarantines, Timeouts).
+    """
+    # Fetch all bans from the server's audit logs
     bans = [entry async for entry in ctx.guild.bans()]
     ban_list = "\n".join([f"• {entry.user} (Reason: {entry.reason})" for entry in bans]) or "None"
     
-    # Quarantined
+    # Locate users with the 'Quarantined' role
     role = discord.utils.get(ctx.guild.roles, name=QUARANTINE_ROLE_NAME)
     quarantined = [m.mention for m in ctx.guild.members if role in m.roles] if role else []
     quarantine_list = "\n".join(quarantined) or "None"
     
-    # Timed Out
+    # Find users currently serving a Discord Timeout
     timed_out = [m.mention for m in ctx.guild.members if m.communication_disabled_until and m.communication_disabled_until > discord.utils.utcnow()]
     timeout_list = "\n".join(timed_out) or "None"
     
-    embed = discord.Embed(title="🛡️ Server Punishment List", color=0xE74C3C, timestamp=discord.utils.utcnow())
-    embed.add_field(name="🔨 Banned Users", value=ban_list[:1024], inline=False)
-    embed.add_field(name="⚖️ Quarantined Users", value=quarantine_list[:1024], inline=False)
-    embed.add_field(name="🔇 Timed Out Users", value=timeout_list[:1024], inline=False)
+    embed = discord.Embed(
+        title="🛡️ Paradox Security | Active Punishments", 
+        color=0xE74C3C, 
+        timestamp=discord.utils.utcnow()
+    )
+    embed.add_field(name="🔨 Server Bans", value=ban_list[:1024], inline=False)
+    embed.add_field(name="⚖️ Quarantined", value=quarantine_list[:1024], inline=False)
+    embed.add_field(name="🔇 Active Timeouts", value=timeout_list[:1024], inline=False)
     
     await ctx.send(embed=embed)
 
 @bot.command(name="swearlist")
 @is_authorized()
 async def swearlist_cmd(ctx: commands.Context):
-    """List all blacklisted words."""
+    """
+    Displays the current dictionary of forbidden words for this server.
+    """
     cfg = load_config()
     swears = cfg.get("SWEAR_WORDS", [])
     
     if not swears:
-        return await ctx.send("ℹ️ No swear words are currently blacklisted.")
+        return await ctx.send("ℹ️ The swear filter is currently empty. Use `!addswear` to add words.")
         
     text = ", ".join([f"`{w}`" for w in swears])
-    embed = discord.Embed(title="🚫 Blacklisted Words", description=text[:4000], color=0xE74C3C)
+    embed = discord.Embed(
+        title="🚫 Swear Filter Blacklist", 
+        description=text[:4000], 
+        color=0xE74C3C
+    )
     await ctx.send(embed=embed)
 
 # ── !setbypass ────────────────────────────────
@@ -5726,6 +5833,64 @@ async def quest_claim_cmd(ctx: commands.Context, action: str = "claim"):
     await db.update_balance(user_id, total_reward)
     
     await ctx.send(f"🎊 You claimed **{claimed_count}** quest rewards and earned **{total_reward:,}** {CURRENCY_NAME}!")
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  🎙️ AUTO-VC SYSTEM (TEMP ROOMS)
+#  Handles automatic creation and deletion of temporary voice channels.
+# ──────────────────────────────────────────────────────────────────────────────
+
+@bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    """Logic to create and cleanup temporary voice channels."""
+    cfg = load_config()
+    master_id = cfg.get("AUTO_VC_MASTER_ID")
+    
+    # 1. HANDLE CREATION
+    if after.channel and after.channel.id == master_id:
+        guild = member.guild
+        count = cfg.get("AUTO_VC_COUNT", 1)
+        temp_channels = cfg.get("AUTO_VC_CHANNELS", [])
+        
+        # Create permissions: No one can chat, but everyone can see/join
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(send_messages=False, connect=True, view_channel=True),
+            member: discord.PermissionOverwrite(move_members=True, manage_channels=True, connect=True)
+        }
+        
+        # Create the new private VC
+        new_channel = await guild.create_voice_channel(
+            name=f"Private VC {count}",
+            category=after.channel.category,
+            overwrites=overwrites,
+            reason=f"Auto-VC created for {member.display_name}"
+        )
+        
+        # Move the member
+        try:
+            await member.move_to(new_channel)
+        except:
+            pass # Member might have disconnected immediately
+            
+        # Update config
+        temp_channels.append(new_channel.id)
+        cfg["AUTO_VC_CHANNELS"] = temp_channels
+        cfg["AUTO_VC_COUNT"] = count + 1
+        await save_config_sync(cfg)
+
+    # 2. HANDLE CLEANUP
+    if before.channel:
+        temp_channels = cfg.get("AUTO_VC_CHANNELS", [])
+        if before.channel.id in temp_channels:
+            # If channel is empty, delete it
+            if len(before.channel.members) == 0:
+                try:
+                    await before.channel.delete(reason="Temp Auto-VC empty")
+                    if before.channel.id in temp_channels:
+                        temp_channels.remove(before.channel.id)
+                    cfg["AUTO_VC_CHANNELS"] = temp_channels
+                    await save_config_sync(cfg)
+                except:
+                    pass # Channel might already be deleted
 
 if __name__ == "__main__":
     if not TOKEN or TOKEN == "YOUR_BOT_TOKEN_HERE":
