@@ -1981,13 +1981,28 @@ async def set_level_channel_cmd(ctx: commands.Context, channel: discord.TextChan
 
 @bot.command(name="setautovc")
 @commands.has_permissions(administrator=True)
-async def set_autovc_cmd(ctx: commands.Context, channel: discord.VoiceChannel = None):
-    """Set the trigger channel for Auto-VC creation. Usage: !setautovc <#channel> or !setautovc (to disable)"""
+async def set_autovc_cmd(ctx: commands.Context, channel_input: str = None):
+    """Set the trigger channel for Auto-VC creation. Usage: !setautovc <ID/Name> or !setautovc (to disable)"""
     cfg = load_config()
-    if channel is None:
+    if channel_input is None:
         cfg["AUTO_VC_MASTER_ID"] = None
         await save_config_sync(cfg)
         return await ctx.send("✅ Auto-VC system has been **disabled**.")
+        
+    # Try to find the channel
+    channel = None
+    
+    # 1. Try ID or Mention
+    clean_id = "".join(filter(str.isdigit, channel_input))
+    if clean_id:
+        channel = ctx.guild.get_channel(int(clean_id))
+        
+    # 2. Try Name if ID lookup failed
+    if not isinstance(channel, discord.VoiceChannel):
+        channel = discord.utils.get(ctx.guild.voice_channels, name=channel_input)
+
+    if not isinstance(channel, discord.VoiceChannel):
+        return await ctx.send("❌ I couldn't find a **Voice Channel** with that ID or Name. Please try using the **Channel ID** directly!")
         
     cfg["AUTO_VC_MASTER_ID"] = channel.id
     if "AUTO_VC_COUNT" not in cfg: cfg["AUTO_VC_COUNT"] = 1
