@@ -605,43 +605,6 @@ class HelpSelect(discord.ui.Select):
             options.append(discord.SelectOption(label="Server Boost", description="Rewards, Logs & Special Roles", emoji="💎", value="boost"))
         super().__init__(placeholder="Select a category to view commands...", options=options)
 
-class SetupGuideView(discord.ui.View):
-    """View containing the button to reveal the Setup Guide."""
-    def __init__(self):
-        super().__init__(timeout=180)
-
-    @discord.ui.button(label="📖 Setup Guide", style=discord.ButtonStyle.secondary, custom_id="show_setup_guide")
-    async def show_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
-        prefix = load_config().get("PREFIX", "!")
-        
-        embed = discord.Embed(
-            title="📖 Paradox Bot | Setup Guide",
-            description=(
-                "Welcome to the official setup guide! Follow these steps to get your server running perfectly:\n\n"
-                "### 1️⃣ Core Greetings\n"
-                f"• Set where I talk: `{prefix}setwelcomechannel #channel`\n"
-                f"• Customize the join message: `{prefix}setwelcome Welcome {mention}!`\n"
-                f"• Test the result: `{prefix}testjoin`\n\n"
-                "### 2️⃣ Automation\n"
-                f"• Assign a role on join: `{prefix}autorole Member`\n"
-                f"• Enable the swear filter: `{prefix}togglefilter`\n"
-                f"• Choose a log channel: `{prefix}setlogchannel #logs`\n\n"
-                "### 3️⃣ Support & Service\n"
-                f"• Create a ticket panel: `{prefix}setupticket support`\n"
-                f"• Setup carry requests: `{prefix}setupticket carry`\n"
-                f"• Add game options: `{prefix}addgame ALS ⚔️ Anime Last Stand`\n\n"
-                "### 4️⃣ Economy Management\n"
-                f"• Set daily reward: (Managed via DB)\n"
-                f"• Reset economy: `{prefix}reseteco all` (Owner only)\n\n"
-                "**Need more help?** Join our support server or visit our documentation! 💜"
-            ),
-            color=0x9B59B6,
-            timestamp=discord.utils.utcnow()
-        )
-        embed.set_footer(text="Paradox Bot | The ultimate server assistant")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
     async def callback(self, interaction: discord.Interaction):
         cat = self.values[0]
         prefix = load_config().get("PREFIX", "!")
@@ -791,6 +754,43 @@ class SetupGuideView(discord.ui.View):
 
         embed.set_footer(text=f"Paradox Bot 💜 | {cat.capitalize()} Menu")
         await interaction.response.edit_message(embed=embed)
+
+class SetupGuideView(discord.ui.View):
+    """View containing the button to reveal the Setup Guide."""
+    def __init__(self):
+        super().__init__(timeout=180)
+
+    @discord.ui.button(label="📖 Setup Guide", style=discord.ButtonStyle.secondary, custom_id="show_setup_guide")
+    async def show_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
+        prefix = load_config().get("PREFIX", "!")
+        
+        embed = discord.Embed(
+            title="📖 Paradox Bot | Setup Guide",
+            description=(
+                "Welcome to the official setup guide! Follow these steps to get your server running perfectly:\n\n"
+                "### 1️⃣ Core Greetings\n"
+                f"• Set where I talk: `{prefix}setwelcomechannel #channel`\n"
+                f"• Customize the join message: `{prefix}setwelcome Welcome {{mention}}!`\n"
+                f"• Test the result: `{prefix}testjoin`\n\n"
+                "### 2️⃣ Automation\n"
+                f"• Assign a role on join: `{prefix}autorole Member`\n"
+                f"• Enable the swear filter: `{prefix}togglefilter`\n"
+                f"• Choose a log channel: `{prefix}setlogchannel #logs`\n\n"
+                "### 3️⃣ Support & Service\n"
+                f"• Create a ticket panel: `{prefix}setupticket support`\n"
+                f"• Setup carry requests: `{prefix}setupticket carry`\n"
+                f"• Add game options: `{prefix}addgame ALS ⚔️ Anime Last Stand`\n\n"
+                "### 4️⃣ Economy Management\n"
+                f"• Set daily reward: (Managed via DB)\n"
+                f"• Reset economy: `{prefix}reseteco all` (Owner only)\n\n"
+                "**Need more help?** Join our support server or visit our documentation! 💜"
+            ),
+            color=0x9B59B6,
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_footer(text="Paradox Bot | The ultimate server assistant")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class HelperTicketView(discord.ui.View):
     """View for the Helper/Carry application dropdown."""
