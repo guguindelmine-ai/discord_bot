@@ -28,6 +28,7 @@ import random
 import secrets
 import asyncio
 from datetime import datetime, timedelta
+import keep_alive
 from bot_functions import (
     load_config,
     save_config,
@@ -5766,5 +5767,8 @@ if __name__ == "__main__":
         print("  🚢  Railway: Add DISCORD_TOKEN in variables")
         print("═" * 50)
     else:
+        # Start keep-alive server for 24/7 uptime
+        keep_alive.keep_alive()
+        
         # Run the bot
         bot.run(TOKEN)
