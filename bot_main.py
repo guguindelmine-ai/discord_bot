@@ -2934,7 +2934,7 @@ async def set_bypass_cmd(ctx: commands.Context, target: str):
     except:
         return await ctx.send("❌ Please mention a valid user or role.")
 
-@bot.command(name="viewconfig", aliases=["showconfig", "tiers"])
+@bot.command(name="viewconfig", aliases=["showconfig"])
 @is_authorized()
 async def view_config_cmd(ctx: commands.Context):
     """View all current punishment tiers, cooldowns, and thresholds."""
