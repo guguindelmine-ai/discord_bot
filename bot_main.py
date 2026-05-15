@@ -391,23 +391,6 @@ async def apply_interest_task():
     await db.apply_bank_interest(multiplier)
     print(f"  [ECONOMY] Hourly bank interest applied: {rate:.2f}% ({tier})")
 
-@tasks.loop(hours=24)
-async def check_loans_task():
-    """Check for overdue loans and apply penalties."""
-    users = await db.get_all_users()
-    now = datetime.now()
-    for user_doc in users:
-        loan = user_doc.get("loan")
-        if not loan or loan.get("paid", False): continue
-        
-        due_date = datetime.strptime(loan["due_date"], "%Y-%m-%d %H:%M:%S")
-        if now > due_date:
-            # Overdue!
-            user_id = user_doc["_id"]
-            amount = loan["amount"]
-            penalty = int(amount * 0.1) # 10% penalty
-            await db.update_balance(user_id, -(amount + penalty))
-            await db.clear_loan(user_id)
             print(f"  [ECONOMY] Loan overdue for {user_id}. Penalty applied.")
 
 # ══════════════════════════════════════════════
@@ -985,32 +968,42 @@ class MacroTicketView(discord.ui.View):
 async def on_ready():
     """Fires when the bot is connected and ready."""
     
+    print("  [DEBUG] Starting on_ready...")
     # Initialize Database if URI is present
     mongo_uri = os.getenv("MONGO_URI")
     if mongo_uri:
+        print("  [DEBUG] Connecting to MongoDB...")
         db.setup(mongo_uri)
         
         # ── Sync Config from Database ──
-        db_cfg = await db.get_config()
-        if db_cfg:
-            local_cfg = load_config()
-            local_cfg.update(db_cfg)
-            save_config(local_cfg)
-            
-            # Update global LEVEL_ROLES if present in DB
-            if "LEVEL_ROLES" in db_cfg:
-                global LEVEL_ROLES
-                LEVEL_ROLES.update({int(k): v for k, v in db_cfg["LEVEL_ROLES"].items()})
+        print("  [DEBUG] Syncing config from DB...")
+        try:
+            db_cfg = await db.get_config()
+            if db_cfg:
+                local_cfg = load_config()
+                local_cfg.update(db_cfg)
+                save_config(local_cfg)
+                global config
+                config = local_cfg
                 
-            print("  📁  Configuration synced from Database to local storage.")
+                # Update global LEVEL_ROLES if present in DB
+                if "LEVEL_ROLES" in db_cfg:
+                    global LEVEL_ROLES
+                    LEVEL_ROLES.update({int(k): v for k, v in db_cfg["LEVEL_ROLES"].items()})
+                    
+                print("  📁  Configuration synced from Database to local storage.")
+        except Exception as e:
+            print(f"  [ERROR] Database sync failed: {e}")
     
     # Register persistent views
+    print("  [DEBUG] Registering persistent views...")
     bot.add_view(SupportTicketView())
     bot.add_view(MacroTicketView())
     bot.add_view(HelperTicketView())
     bot.add_view(TicketControlView())
 
     # Start economy background tasks
+    print("  [DEBUG] Starting background tasks...")
     if not apply_interest_task.is_running():
         apply_interest_task.start()
     if not check_loans_task.is_running():
@@ -1026,11 +1019,13 @@ async def on_ready():
     print("═" * 50)
 
     # Set a custom status
+    print("  [DEBUG] Setting presence...")
     activity = discord.Activity(
         type=discord.ActivityType.watching,
         name=f"{PREFIX}help | Paradox Bot 💜"
     )
     await bot.change_presence(status=discord.Status.online, activity=activity)
+    print("  [DEBUG] on_ready complete!")
 
 # ── AUTO-ROLE + WELCOME MESSAGE ──────────────
 
@@ -1465,7 +1460,14 @@ async def help_cmd(ctx: commands.Context, *sub: str):
         await ctx.send(f"❓ Type `{PREFIX}help paradox` to open my interactive menu!")
         return
 
-    is_admin = ctx.author.guild_permissions.administrator or ctx.author.guild_permissions.manage_guild
+    _cfg = load_config()
+    _bypass_users = _cfg.get("BYPASS_USER_IDS", [])
+    _bypass_roles = _cfg.get("BYPASS_ROLE_IDS", [])
+    _is_bypassed = (ctx.author.id in _bypass_users or
+                    any(role.id in _bypass_roles for role in ctx.author.roles))
+    is_admin = (ctx.author.guild_permissions.administrator or
+                ctx.author.guild_permissions.manage_guild or
+                _is_bypassed)
     
     embed = discord.Embed(
         title="🤖 Paradox Help Assistant",
@@ -1491,7 +1493,7 @@ async def help_cmd(ctx: commands.Context, *sub: str):
 # ── !setupticket ─────────────────────────────
 
 @bot.command(name="setupticket")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def setup_ticket_cmd(ctx: commands.Context, mode: str = "support"):
     """Setup the ticket system. Modes: support, macro, helper. Admin only."""
     mode = mode.lower()
@@ -1569,7 +1571,7 @@ async def setup_ticket_cmd(ctx: commands.Context, mode: str = "support"):
     await ctx.message.delete()
 
 @bot.command(name="sethelpertext")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_helper_text(ctx: commands.Context, game_code: str, *, questions_input: str):
     """
     Set or update application questions. 
@@ -1638,7 +1640,7 @@ async def set_helper_text(ctx: commands.Context, game_code: str, *, questions_in
 # ── !testjoin ────────────────────────────────
 
 @bot.command(name="testjoin")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def test_join_cmd(ctx: commands.Context):
     """Simulate a member join to test the welcome message. Admin only."""
     member = ctx.author
@@ -1679,7 +1681,7 @@ async def test_join_cmd(ctx: commands.Context):
 # ── !testleave ───────────────────────────────
 
 @bot.command(name="testleave")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def test_leave_cmd(ctx: commands.Context):
     """Simulate a member leave to test the goodbye message. Admin only."""
     member = ctx.author
@@ -1735,7 +1737,7 @@ async def goodbye_cmd(ctx: commands.Context):
 # ── !setwelcome ──────────────────────────────
 
 @bot.command(name="setwelcome")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_welcome_cmd(ctx: commands.Context, *, message: str):
     """Set a custom automated join message. Admin only.
     Usage: !setwelcome Welcome {mention}! You are member #{count}.
@@ -1748,14 +1750,14 @@ async def set_welcome_cmd(ctx: commands.Context, *, message: str):
 # ── !set ───────────────────────────────────────
 
 @bot.group(name="set", invoke_without_command=True)
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_cmd(ctx: commands.Context):
     """Configuration commands for the bot."""
     if ctx.invoked_subcommand is None:
         await ctx.send(f"❓ Usage: `{PREFIX}set paradoxy @user <amount>`")
 
 @set_cmd.command(name="paradoxy")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_paradoxy_cmd(ctx: commands.Context, member: discord.Member = None, amount: int = None):
     """Set a user's paradoxy (economy balance). Admin only."""
     if member is None or amount is None:
@@ -1767,7 +1769,7 @@ async def set_paradoxy_cmd(ctx: commands.Context, member: discord.Member = None,
 # ── !setgoodbye ──────────────────────────────
 
 @bot.group(name="setgoodbye", invoke_without_command=True)
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_goodbye_cmd(ctx: commands.Context, *, message: str = None):
     """Set a custom automated leave message or channel. Admin only.
     Usage: !setgoodbye {member} has left the server.
@@ -1782,7 +1784,7 @@ async def set_goodbye_cmd(ctx: commands.Context, *, message: str = None):
             await ctx.send(f"❓ Usage: `{PREFIX}setgoodbye <message>` or `{PREFIX}setgoodbye channel <#ch>`")
 
 @set_goodbye_cmd.command(name="channel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_goodbye_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
     """Set the goodbye channel only. Admin only.
     Usage: !setgoodbye channel #channel
@@ -1795,7 +1797,7 @@ async def set_goodbye_channel_cmd(ctx: commands.Context, channel: discord.TextCh
 # ── !setimg ──────────────────────────────────
 
 @bot.command(name="setimg")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_img_cmd(ctx: commands.Context, mode: str, url: str = None):
     """Set welcome/goodbye image. Attach an image or provide URL.
     Usage: !setimg welcome [url]
@@ -1826,13 +1828,13 @@ async def set_img_cmd(ctx: commands.Context, mode: str, url: str = None):
 # ── !logwhitelist ────────────────────────────
 
 @bot.group(name="logwhitelist", invoke_without_command=True)
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def log_whitelist_grp(ctx: commands.Context):
     """Manage the log whitelist (users who won't be logged). Usage: !logwhitelist <add/remove/list>"""
     await ctx.send(f"❓ Usage: `{PREFIX}logwhitelist <add/remove/list> @user`")
 
 @log_whitelist_grp.command(name="add")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def log_whitelist_add(ctx: commands.Context, member: discord.Member):
     """Add a user to the log whitelist."""
     cfg = load_config()
@@ -1848,7 +1850,7 @@ async def log_whitelist_add(ctx: commands.Context, member: discord.Member):
     await ctx.send(f"✅ {member.mention} has been added to the log whitelist! Their messages will no longer be logged.")
 
 @log_whitelist_grp.command(name="remove")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def log_whitelist_remove(ctx: commands.Context, member: discord.Member):
     """Remove a user from the log whitelist."""
     cfg = load_config()
@@ -1935,7 +1937,7 @@ async def rank_cmd(ctx: commands.Context):
 # ── !setlevel ────────────────────────────────
 
 @bot.command(name="setlevel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_level_cmd(ctx: commands.Context, member: discord.Member, level: int):
     """Set a user's level. Admin only."""
     if level < 0:
@@ -1954,7 +1956,7 @@ async def set_level_cmd(ctx: commands.Context, member: discord.Member, level: in
 # ── !setxp ───────────────────────────────────
 
 @bot.command(name="setxp")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_xp_cmd(ctx: commands.Context, member: discord.Member, xp: int):
     """Set a user's total XP. Admin only."""
     if xp < 0:
@@ -1971,7 +1973,7 @@ async def set_xp_cmd(ctx: commands.Context, member: discord.Member, xp: int):
     await ctx.send(f"✅ Set {member.mention}'s XP to **{xp:,}** (New Level: {level}).")
 
 @bot.command(name="setlevelchannel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_level_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
     """Set the channel for level-up notifications. Admin only."""
     cfg = load_config()
@@ -1980,7 +1982,7 @@ async def set_level_channel_cmd(ctx: commands.Context, channel: discord.TextChan
     await ctx.send(f"✅ Level-up notifications will now be sent in {channel.mention}")
 
 @bot.command(name="setautovc")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_autovc_cmd(ctx: commands.Context, channel_input: str = None):
     """Set the trigger channel for Auto-VC creation. Usage: !setautovc <ID/Name> or !setautovc (to disable)"""
     cfg = load_config()
@@ -2012,7 +2014,7 @@ async def set_autovc_cmd(ctx: commands.Context, channel_input: str = None):
     await ctx.send(f"✅ Auto-VC Master set to **{channel.name}**. Users joining this will get a private room!")
 
 @bot.command(name="setconfessionschannel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_confessions_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
     """Set the channel where anonymous confessions will be posted."""
     cfg = load_config()
@@ -2055,7 +2057,7 @@ async def confess_cmd(ctx: commands.Context, *, message: str):
     # No logging happens here - it's completely silent.
 
 @bot.command(name="setrank")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_rank_cmd(ctx: commands.Context, level: int, *, name: str):
     """Set the name of a rank for a specific level. Admin only.
     Usage: !setrank 5 Squire
@@ -2072,7 +2074,7 @@ async def set_rank_cmd(ctx: commands.Context, level: int, *, name: str):
     await ctx.send("ℹ️ New roles will include the level prefix automatically (e.g. `Level {level}+ | {name}`).")
 
 @log_whitelist_grp.command(name="list")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def log_whitelist_list(ctx: commands.Context):
     """List all log-whitelisted users."""
     cfg = load_config()
@@ -2093,7 +2095,7 @@ async def log_whitelist_list(ctx: commands.Context):
 # ── !setcolor ────────────────────────────────
 
 @bot.command(name="setcolor")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_color_cmd(ctx: commands.Context, hex_code: str):
     """Set the embed color (Hex). Usage: !setcolor #FF00FF"""
     if not hex_code.startswith("#") or len(hex_code) != 7:
@@ -2106,7 +2108,7 @@ async def set_color_cmd(ctx: commands.Context, hex_code: str):
     await ctx.send(f"✅ Embed color updated to **{hex_code}**!")
 
 @bot.command(name="autorole")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_autorole_cmd(ctx: commands.Context, *, role_name: str):
     """Set the auto-role name. Admin only.
     Usage: !autorole RoleName
@@ -2125,7 +2127,7 @@ async def set_autorole_cmd(ctx: commands.Context, *, role_name: str):
 # ── !setwelcomechannel ───────────────────────
 
 @bot.command(name="setwelcomechannel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_welcome_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
     """Set the welcome/goodbye channel. Admin only.
     Usage: !setwelcomechannel #channel
@@ -2139,7 +2141,7 @@ async def set_welcome_channel_cmd(ctx: commands.Context, channel: discord.TextCh
 # ── !setlogchannel ───────────────────────────
 
 @bot.command(name="setlogchannel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_log_channel_cmd(ctx: commands.Context, channel: discord.TextChannel):
     """Set the channel for logs (moderation, edits, deletes). Admin only.
     Usage: !setlogchannel #channel
@@ -2150,7 +2152,7 @@ async def set_log_channel_cmd(ctx: commands.Context, channel: discord.TextChanne
     await ctx.send(f"✅ Log channel set to {channel.mention}")
 
 @bot.command(name="togglewelcome")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def toggle_welcome_cmd(ctx: commands.Context):
     """Enable or disable welcome messages. Admin only."""
     cfg = load_config()
@@ -2164,13 +2166,13 @@ async def toggle_welcome_cmd(ctx: commands.Context):
 # ── !whitelist ───────────────────────────────
 
 @bot.group(name="whitelist", invoke_without_command=True)
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def whitelist_grp(ctx: commands.Context):
     """Manage the swear filter whitelist. Usage: !whitelist <add/remove/list>"""
     await ctx.send(f"❓ Usage: `{PREFIX}whitelist <add/remove/list> @user`")
 
 @whitelist_grp.command(name="add")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def whitelist_add(ctx: commands.Context, member: discord.Member):
     """Add a user to the swear filter whitelist."""
     cfg = load_config()
@@ -2186,7 +2188,7 @@ async def whitelist_add(ctx: commands.Context, member: discord.Member):
     await ctx.send(f"✅ {member.mention} has been added to the whitelist! They can now bypass the swear filter.")
 
 @whitelist_grp.command(name="remove")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def whitelist_remove(ctx: commands.Context, member: discord.Member):
     """Remove a user from the swear filter whitelist."""
     cfg = load_config()
@@ -2202,7 +2204,7 @@ async def whitelist_remove(ctx: commands.Context, member: discord.Member):
     await ctx.send(f"✅ {member.mention} has been removed from the whitelist.")
 
 @whitelist_grp.command(name="list")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def whitelist_list(ctx: commands.Context):
     """List all whitelisted users."""
     cfg = load_config()
@@ -2221,7 +2223,7 @@ async def whitelist_list(ctx: commands.Context):
     await ctx.send(embed=embed)
 
 @bot.command(name="addswear")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def add_swear_cmd(ctx: commands.Context, *, word: str):
     """Add a word to the swear filter. Admin only.
     Usage: !addswear badword
@@ -2315,7 +2317,7 @@ async def poll_cmd(ctx: commands.Context, question: str, duration: str = "60"):
         pass
 
 @bot.command(name="removeswear")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def remove_swear_cmd(ctx: commands.Context, *, word: str):
     """Remove a word from the swear filter. Admin only.
     Usage: !removeswear badword
@@ -2336,7 +2338,7 @@ async def remove_swear_cmd(ctx: commands.Context, *, word: str):
 # ── !togglefilter ────────────────────────────
 
 @bot.command(name="togglefilter")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def toggle_filter_cmd(ctx: commands.Context):
     """Toggle the swear word filter on/off. Admin only."""
     cfg = load_config()
@@ -2350,7 +2352,7 @@ async def toggle_filter_cmd(ctx: commands.Context):
 # ── !swearlog ───────────────────────────────
 
 @bot.command(name="swearlog")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def swear_log_cmd(ctx: commands.Context, member: discord.Member = None):
     """View the history of filtered words. Usage: !swearlog [@user]"""
     if member:
@@ -2520,7 +2522,7 @@ async def quarantine_cmd(ctx, member: discord.Member, clause: str = None, *, rea
     await log_moderation(ctx.guild, msg, reason)
 
 @bot.command(name="addscam")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def add_scam_cmd(ctx, link: str):
     """Add a new link to the phishing blacklist."""
     global SCAM_LINKS
@@ -2536,7 +2538,7 @@ async def add_scam_cmd(ctx, link: str):
     await ctx.send(f"✅ Link `{link}` added to phishing filter!")
 
 @bot.command(name="clearscamlog")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def clear_scam_log_cmd(ctx, member: discord.Member):
     """Reset the scam/phishing infraction count for a user."""
     strikes = await db.get_scam_strikes(str(member.id))
@@ -2547,7 +2549,7 @@ async def clear_scam_log_cmd(ctx, member: discord.Member):
         await ctx.send("ℹ️ This user has no phishing history.")
 
 @bot.command(name="unquarantine")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def unquarantine_cmd(ctx, member: discord.Member):
     """Manually release a member from quarantine and restore roles."""
     cfg = load_config()
@@ -2580,7 +2582,7 @@ async def unquarantine_cmd(ctx, member: discord.Member):
         await ctx.send(f"ℹ️ **{member.display_name}** is not in quarantine.")
 
 @bot.command(name="setthreshold")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_threshold_cmd(ctx, system: str, key: str, value: int):
     """Set security thresholds. Usage: !setthreshold <swear/scam> <key> <value>"""
     cfg = load_config()
@@ -2804,7 +2806,7 @@ async def swearlist_cmd(ctx: commands.Context):
 # ── !setbypass ────────────────────────────────
 
 @bot.command(name="setbypass")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_bypass_cmd(ctx: commands.Context, target: str):
     """Give a user or role access to all commands except ban. Usage: !setbypass @user or !setbypass @role"""
     cfg = load_config()
@@ -2962,7 +2964,7 @@ async def set_cooldown_cmd(ctx: commands.Context, command_name: str, duration: s
 # ── !setboostchannel ──────────────────────────
 
 @bot.command(name="setboostchannel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_boost_channel(ctx: commands.Context, channel: discord.TextChannel):
     """Set the channel for boost messages. Admin only."""
     cfg = load_config()
@@ -2971,7 +2973,7 @@ async def set_boost_channel(ctx: commands.Context, channel: discord.TextChannel)
     await ctx.send(f"✅ Boost messages will now be sent in {channel.mention}.")
 
 @bot.command(name="setboostrole")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_boost_role(ctx: commands.Context, *, role_name: str):
     """Set the custom role given when a user boosts. Admin only."""
     cfg = load_config()
@@ -2982,7 +2984,7 @@ async def set_boost_role(ctx: commands.Context, *, role_name: str):
 
 
 @bot.command(name="setboostmessage")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_boost_message(ctx: commands.Context, *, message: str):
     """Set custom boost message. Admin only."""
     cfg = load_config()
@@ -2992,7 +2994,7 @@ async def set_boost_message(ctx: commands.Context, *, message: str):
 
 # ── !testboost / !setboost ────────────────────
 @bot.command(name="testboost", aliases=["setboost"])
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def test_boost(ctx: commands.Context, member: discord.Member = None):
     """Simulate a server boost for yourself or another member. Admin only.
     Usage: !testboost [@user] or !setboost @user
@@ -3052,7 +3054,7 @@ async def test_boost(ctx: commands.Context, member: discord.Member = None):
 # ── !setticketcategory ───────────────────────
 
 @bot.command(name="setticketcategory")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_ticket_category(ctx: commands.Context, category_id: str):
     """Set the category where new tickets are opened. Admin only."""
     cfg = load_config()
@@ -3063,7 +3065,7 @@ async def set_ticket_category(ctx: commands.Context, category_id: str):
 # ── !addboostselectrole ───────────────────────
 
 @bot.command(name="addboostselectrole")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def add_boost_select_role(ctx: commands.Context, *, role_name: str):
     """Add a role to the booster selection menu. Admin only."""
     cfg = load_config()
@@ -3079,7 +3081,7 @@ async def add_boost_select_role(ctx: commands.Context, *, role_name: str):
 # ── !removeboostselectrole ────────────────────
 
 @bot.command(name="removeboostselectrole")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def remove_boost_select_role(ctx: commands.Context, *, role_name: str):
     """Remove a role from the booster selection menu. Admin only."""
     cfg = load_config()
@@ -3095,7 +3097,7 @@ async def remove_boost_select_role(ctx: commands.Context, *, role_name: str):
 # ── !setvouchchannel ──────────────────────────
 
 @bot.command(name="setvouchchannel")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def set_vouch_channel(ctx: commands.Context, channel: discord.TextChannel):
     """Set the channel where ticket vouches are logged. Admin only."""
     cfg = load_config()
@@ -3131,7 +3133,7 @@ async def check_vouches(ctx: commands.Context, member: discord.Member = None):
 # ── !addgame & !togglegame ────────────────────
 
 @bot.command(name="addgame")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def addgame_cmd(ctx: commands.Context, game_id: str, emoji: str, *, name: str):
     """Add a new game to the ticket system. Usage: !addgame ID Emoji Full Name"""
     game_id = game_id.upper()
@@ -3148,7 +3150,7 @@ async def addgame_cmd(ctx: commands.Context, game_id: str, emoji: str, *, name: 
     await ctx.send(f"✅ Game **{name}** ({game_id}) added and set to active!")
 
 @bot.command(name="togglegame")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def togglegame_cmd(ctx: commands.Context, game_id: str):
     """Toggle whether a game is active in the ticket menus."""
     game_id = game_id.upper()
@@ -3169,7 +3171,7 @@ async def togglegame_cmd(ctx: commands.Context, game_id: str):
 # ── !setrank & !setvouches & !autorole ────────
 
 @bot.command(name="setrole")
-@commands.has_permissions(manage_roles=True)
+@is_authorized()
 async def setrole_cmd(ctx: commands.Context, member: discord.Member, *, role: discord.Role):
     """Give or take a role from a user. Usage: !setrole @user RoleName"""
     try:
@@ -3185,7 +3187,7 @@ async def setrole_cmd(ctx: commands.Context, member: discord.Member, *, role: di
         await ctx.send(f"❌ An error occurred: {e}")
 
 @bot.command(name="listroles")
-@commands.has_permissions(manage_roles=True)
+@is_authorized()
 async def list_roles_cmd(ctx: commands.Context):
     """List all roles and show which ones the bot can manage."""
     bot_top_role = ctx.guild.me.top_role
@@ -3211,7 +3213,7 @@ async def list_roles_cmd(ctx: commands.Context):
     await ctx.send(embed=embed)
 
 @bot.command(name="setvouches")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def setvouches_cmd(ctx: commands.Context, member: discord.Member, vouches: int):
     """Set a member's exact vouch count manually."""
     if vouches < 0:
@@ -3247,7 +3249,7 @@ async def say_color_cmd(ctx: commands.Context, color: str, *, text: str):
 # ── !add & !remove (Ticket Management) ────────
 
 @bot.command(name="add")
-@commands.has_permissions(manage_channels=True)
+@is_authorized()
 async def add_ticket_user(ctx: commands.Context, member: discord.Member):
     """Add a user to the current ticket."""
     if "support-" not in ctx.channel.name and "macro-" not in ctx.channel.name and "carry-" not in ctx.channel.name and "apply-" not in ctx.channel.name:
@@ -3258,7 +3260,7 @@ async def add_ticket_user(ctx: commands.Context, member: discord.Member):
     await ctx.send(f"✅ Added {member.mention} to the ticket.")
 
 @bot.command(name="remove")
-@commands.has_permissions(manage_channels=True)
+@is_authorized()
 async def remove_ticket_user(ctx: commands.Context, member: discord.Member):
     """Remove a user from the current ticket."""
     if "support-" not in ctx.channel.name and "macro-" not in ctx.channel.name and "carry-" not in ctx.channel.name and "apply-" not in ctx.channel.name:
@@ -3269,7 +3271,7 @@ async def remove_ticket_user(ctx: commands.Context, member: discord.Member):
     await ctx.send(f"✅ Removed {member.display_name} from the ticket.")
 
 @bot.command(name="migrate")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def migrate_cmd(ctx: commands.Context, arg: str = None):
     """Migrate data. Usage: !migrate db (JSON -> DB) or !migrate json (DB -> JSON)"""
     if arg == "db":
@@ -3999,7 +4001,7 @@ async def leaderboard_cmd(ctx: commands.Context):
     await ctx.send(embed=embed)
 
 @bot.command(name="allow")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def allow_cmd(ctx: commands.Context, member: discord.Member, *, command: str):
     """Allow a user to use a hidden command. Admin only."""
     await ctx.send("❌ No commands currently available to allow.")
@@ -5026,47 +5028,6 @@ class BlackjackView(discord.ui.View):
         
         await self.ctx.send(embed=embed)
 
-# ── HEIST & JAIL SYSTEM ────────────────────────
-
-class HeistTargetView(discord.ui.View):
-    def __init__(self, ctx):
-        super().__init__(timeout=30)
-        self.ctx = ctx  
-        self.user_id = ctx.author.id
-        self.selection_made = False
-
-    async def on_timeout(self):
-        if not self.selection_made:
-            user_id = str(self.user_id)
-            jail_time = 10
-            await db.set_cooldown(user_id, "jail", datetime.now() + timedelta(minutes=jail_time))
-            try:
-                await self.ctx.send(f"🚨 <@{self.user_id}>, you took too long to plan the heist! You've been spotted and jailed for **{jail_time}m**.")
-            except: pass
-
-    @discord.ui.button(label="Jewelry Store", style=discord.ButtonStyle.primary)
-    async def jewelry(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id or self.selection_made: return
-        self.selection_made = True
-        await self.choose_target(interaction, "jewelry")
-
-    @discord.ui.button(label="Main Bank", style=discord.ButtonStyle.primary)
-    async def bank(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id or self.selection_made: return
-        self.selection_made = True
-        await self.choose_target(interaction, "bank")
-
-    @discord.ui.button(label="Armored Truck", style=discord.ButtonStyle.primary)
-    async def truck(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id or self.selection_made: return
-        self.selection_made = True
-        await self.choose_target(interaction, "truck")
-
-    async def choose_target(self, interaction: discord.Interaction, target: str):
-        embed = discord.Embed(title="🏦 Strategic Heist", color=0x34495E)
-        embed.description = f"You chose the **{HEIST_TARGETS[target]['name']}**. Now choose your difficulty. Easy is lower risk with extra attempts."
-        view = CrimeDifficultyView(self.ctx, target)
-        await interaction.response.edit_message(embed=embed, view=view)
 
 class CrimeDifficultyView(discord.ui.View):
     def __init__(self, ctx, target: str):
@@ -5580,7 +5541,7 @@ async def send_social_embed(ctx, target, action):
     await ctx.send(embed=embed)
 
 @bot.command(name="setgif")
-@commands.has_permissions(administrator=True)
+@is_authorized()
 async def setgif_cmd(ctx: commands.Context, action: str, url: str):
     """Set a GIF for a social or flavor action. Usage: !setgif <action> <url>"""
     global config
@@ -5668,7 +5629,7 @@ async def flex_cmd(ctx, target: discord.Member): await send_social_embed(ctx, ta
 
 # ── FLAVOR MODERATION ──────────────────────────
 @bot.command(name="blast")
-@commands.has_permissions(moderate_members=True)
+@is_authorized()
 async def blast_cmd(ctx, member: discord.Member, *, reason: str = "Blasted!"):
     """Mute a member with a blast GIF. Mod only."""
     await member.timeout(timedelta(minutes=10), reason=reason)
@@ -5684,7 +5645,7 @@ async def blast_cmd(ctx, member: discord.Member, *, reason: str = "Blasted!"):
     await log_moderation(ctx.guild, f"💥 {member.name} was blasted (10m mute)", reason)
 
 @bot.command(name="rct", aliases=["rcs", "unmute"])
-@commands.has_permissions(moderate_members=True)
+@is_authorized()
 async def rct_cmd(ctx, member: discord.Member):
     """Unmute a member with a recovery GIF. Mod only."""
     await member.timeout(None, reason="RCT Recovery")
@@ -5700,7 +5661,7 @@ async def rct_cmd(ctx, member: discord.Member):
     await log_moderation(ctx.guild, f"✨ {member.name} was recovered (unmute)", "RCT")
 
 @bot.command(name="annihilate")
-@commands.has_permissions(ban_members=True)
+@is_authorized(exclude_ban=True)
 async def annihilate_cmd(ctx, member: discord.Member, *, reason: str = "Annihilated!"):
     """Ban a member with an annihilation GIF. Admin only."""
     await member.ban(reason=reason)
