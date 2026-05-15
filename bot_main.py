@@ -683,12 +683,13 @@ class HelpSelect(discord.ui.Select):
                 f"`{prefix}blast <@user>` - 10m mute with a boom\n"
                 f"`{prefix}unmute` / `!rct` <@user> - Unmute or recover a user\n"
                 f"`{prefix}annihilate <@user>` - Permanent ban with custom style\n\n"
-                f"**Advanced Config (Times & Limits):**\n"
-                f"`{prefix}viewconfig` - **See all your current tiers, times, and limits**\n"
-                f"`{prefix}swearlist` - See all blacklisted swear words\n"
-                f"`{prefix}setcooldown <cmd> <time>` - Set time for `work`, `crime`, `daily`, etc.\n"
+                f"**Advanced Config (Rules & Limits):**\n"
+                f"`{prefix}viewconfig` - Audit all bot settings\n"
+                f"`{prefix}tiers` - **View all active punishment rules**\n"
+                f"`{prefix}settier <rule> <action> <duration> <label>` - Add/Update rule\n"
+                f"`{prefix}deltier <rule>` - Remove a rule\n"
+                f"`{prefix}setcooldown <cmd> <time>` - Set time for `work`, `crime`, etc.\n"
                 f"`{prefix}setswearpenalty <time>` - Set mute duration for swear filter\n"
-                f"`{prefix}settier <tier> <time>` - Set duration for tiers (1.1, 1.2, etc.)\n"
                 f"`{prefix}setswearthreshold <action> <count>` - Set warnings before punishment"
             )
             await interaction.response.edit_message(embed=embed)
@@ -2452,33 +2453,127 @@ async def log_moderation(guild, action_text, reason):
             except: pass
 
 async def apply_tiered_moderation(ctx, member: discord.Member, clause: str, custom_reason: str = None):
-    """Handles 1.x tiered punishments."""
-    mapping = {
-        "1.1": {"action": "mute", "duration": 10, "label": "Rule 1.1 (Minor)"},
-        "1.2": {"action": "quarantine", "duration": 120, "label": "Rule 1.2 (Medium)"},
-        "1.3": {"action": "quarantine", "duration": None, "label": "Rule 1.3 (Severe)"}
-    }
+    """Handles tiered punishments from config. action: mute, quarantine, kick, ban."""
+    cfg = config
+    tiers = cfg.get("PUNISHMENT_TIERS", {})
     
-    tier = mapping.get(clause)
+    tier = tiers.get(clause)
     if not tier:
         return False
         
-    action = tier["action"]
-    label = tier["label"]
+    action = tier.get("action", "mute").lower()
+    label = tier.get("label", f"Rule {clause}")
+    duration = tier.get("duration") # In minutes
     reason = f"[{label}] {custom_reason}" if custom_reason else label
     
-    if action == "mute":
-        await member.timeout(timedelta(minutes=tier["duration"]), reason=reason)
-        msg = f"🔇 **{member.display_name}** was muted for **10 minutes** under **{label}**."
-    elif action == "quarantine":
-        expiry = datetime.now() + timedelta(minutes=tier["duration"]) if tier["duration"] else None
-        await apply_quarantine(member, reason, expiry)
-        duration_str = "2 hours" if tier["duration"] else "Indefinite"
-        msg = f"⚖️ **{member.display_name}** was sent to **Quarantine** for **{duration_str}** under **{label}**."
+    msg = f"⚖️ **{member.display_name}** was punished under **{label}**."
     
-    await ctx.send(msg)
-    await log_moderation(ctx.guild, msg, reason)
+    try:
+        if action == "mute":
+            if not duration: duration = 10
+            await member.timeout(timedelta(minutes=duration), reason=reason)
+            msg = f"🔇 **{member.display_name}** was muted for **{duration}m** under **{label}**."
+        elif action == "quarantine":
+            expiry = datetime.now() + timedelta(minutes=duration) if duration else None
+            await apply_quarantine(member, reason, expiry)
+            dur_str = f"{duration}m" if duration else "Indefinite"
+            msg = f"⚖️ **{member.display_name}** was sent to **Quarantine** for **{dur_str}** under **{label}**."
+        elif action == "kick":
+            await member.kick(reason=reason)
+            msg = f"👢 **{member.display_name}** was kicked under **{label}**."
+        elif action == "ban":
+            await member.ban(reason=reason)
+            msg = f"🔨 **{member.display_name}** was banned under **{label}**."
+        else:
+            await ctx.send(f"❌ Unknown punishment action: `{action}`")
+            return True
+            
+        await ctx.send(msg)
+        await log_moderation(ctx.guild, msg, reason)
+    except discord.Forbidden:
+        await ctx.send(f"❌ I don't have permission to {action} that user.")
+    except Exception as e:
+        await ctx.send(f"❌ Error applying punishment: {e}")
+        
     return True
+
+@bot.command(name="tiers")
+@is_authorized()
+async def tiers_cmd(ctx: commands.Context):
+    """List all active punishment tiers/rules."""
+    cfg = config
+    tiers = cfg.get("PUNISHMENT_TIERS", {})
+    
+    if not tiers:
+        return await ctx.send("📋 No punishment tiers configured. Use `!settier` to add one.")
+        
+    embed = discord.Embed(title="⚖️ Active Punishment Tiers", color=0x9B59B6)
+    embed.description = "Use these rule numbers with `!mute`, `!kick`, `!ban`, etc.\nExample: `!mute @user 1.1`"
+    
+    for rule, data in sorted(tiers.items()):
+        action = data.get('action', 'mute').capitalize()
+        duration = data.get('duration')
+        dur_str = f"{duration}m" if duration else "Permanent/Indefinite"
+        label = data.get('label', 'No Label')
+        
+        embed.add_field(
+            name=f"Rule {rule}",
+            value=f"**Label:** {label}\n**Action:** {action}\n**Duration:** {dur_str}",
+            inline=True
+        )
+    
+    embed.set_footer(text="Paradox Bot 💜")
+    await ctx.send(embed=embed)
+
+@bot.command(name="settier")
+@is_authorized()
+async def set_tier_cmd(ctx: commands.Context, rule: str, action: str, duration: str, *, label: str):
+    """Create or update a punishment tier.
+    Usage: !settier 1.1 mute 10m Minor Spam
+    Actions: mute, quarantine, kick, ban
+    Duration: 10m, 1h, 1d, or 0 for permanent
+    """
+    action = action.lower()
+    if action not in ["mute", "quarantine", "kick", "ban"]:
+        return await ctx.send("❌ Action must be: `mute`, `quarantine`, `kick`, or `ban`.")
+        
+    # Parse duration
+    try:
+        if duration.endswith("m"): mins = int(duration[:-1])
+        elif duration.endswith("h"): mins = int(duration[:-1]) * 60
+        elif duration.endswith("d"): mins = int(duration[:-1]) * 1440
+        elif duration.isdigit(): mins = int(duration)
+        else: mins = 0
+    except:
+        return await ctx.send("❌ Invalid duration. Use e.g. `10m`, `1h`, `1d` or `0`.")
+
+    cfg = load_config()
+    if "PUNISHMENT_TIERS" not in cfg: cfg["PUNISHMENT_TIERS"] = {}
+    
+    cfg["PUNISHMENT_TIERS"][rule] = {
+        "action": action,
+        "duration": mins if mins > 0 else None,
+        "label": label
+    }
+    
+    await save_config_sync(cfg)
+    global config
+    config = cfg
+    await ctx.send(f"✅ **Rule {rule}** updated: `{action}` for `{mins if mins > 0 else 'Indefinite'}` mins. Label: `{label}`")
+
+@bot.command(name="deltier")
+@is_authorized()
+async def del_tier_cmd(ctx: commands.Context, rule: str):
+    """Delete a punishment tier."""
+    cfg = load_config()
+    if "PUNISHMENT_TIERS" in cfg and rule in cfg["PUNISHMENT_TIERS"]:
+        del cfg["PUNISHMENT_TIERS"][rule]
+        await save_config_sync(cfg)
+        global config
+        config = cfg
+        await ctx.send(f"✅ **Rule {rule}** has been removed.")
+    else:
+        await ctx.send(f"❌ Rule `{rule}` not found.")
 
 # ── MODERATION COMMANDS ───────────────────────
 
@@ -5628,19 +5723,34 @@ async def flex_cmd(ctx, target: discord.Member): await send_social_embed(ctx, ta
 # ── FLAVOR MODERATION ──────────────────────────
 @bot.command(name="blast")
 @is_authorized()
-async def blast_cmd(ctx, member: discord.Member, *, reason: str = "Blasted!"):
-    """Mute a member with a blast GIF. Mod only."""
-    await member.timeout(timedelta(minutes=10), reason=reason)
-    # Use global config for reliability
+async def blast_cmd(ctx, member: discord.Member, duration_or_clause: str = "10", *, reason: str = None):
+    """Mute/Punish a member with a blast GIF. Usage: !blast @user 1.1 [reason] or !blast @user 10 [reason]"""
+    # Check for clause first
+    if await apply_tiered_moderation(ctx, member, duration_or_clause, reason):
+        # We still want to send the cool GIF
+        gifs = config.get("ACTION_GIFS", {})
+        gif_url = gifs.get("blast", "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqJmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/lT4Ix992z2zfO/giphy.gif")
+        embed = discord.Embed(title="💥 BLASTED!", description=f"{member.mention} has been blasted under a tiered rule!", color=0xE74C3C)
+        if gif_url: embed.set_image(url=gif_url)
+        await ctx.send(embed=embed)
+        return
+
+    # Fallback to simple mute
+    try:
+        minutes = int(duration_or_clause)
+    except:
+        minutes = 10
+        
+    await member.timeout(timedelta(minutes=minutes), reason=reason or "Blasted!")
     gifs = config.get("ACTION_GIFS", {})
     gif_url = gifs.get("blast", "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqZ3JqJmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/lT4Ix992z2zfO/giphy.gif")
     
-    embed = discord.Embed(title="💥 BLASTED!", description=f"{member.mention} was blasted away for 10 minutes!", color=0xE74C3C)
+    embed = discord.Embed(title="💥 BLASTED!", description=f"{member.mention} was blasted away for {minutes} minutes!", color=0xE74C3C)
     if gif_url:
         embed.set_image(url=gif_url)
     
     await ctx.send(embed=embed)
-    await log_moderation(ctx.guild, f"💥 {member.name} was blasted (10m mute)", reason)
+    await log_moderation(ctx.guild, f"💥 {member.name} was blasted ({minutes}m mute)", reason)
 
 @bot.command(name="rct", aliases=["rcs", "unmute"])
 @is_authorized()
