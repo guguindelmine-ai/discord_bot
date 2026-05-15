@@ -69,11 +69,11 @@ def is_authorized(exclude_ban=False):
             return True
         
         cfg = config
-        bypass_users = cfg.get("BYPASS_USER_IDS", [])
-        bypass_roles = cfg.get("BYPASS_ROLE_IDS", [])
+        bypass_users = [str(uid) for uid in cfg.get("BYPASS_USER_IDS", [])]
+        bypass_roles = [str(rid) for rid in cfg.get("BYPASS_ROLE_IDS", [])]
         
-        is_bypassed = (ctx.author.id in bypass_users or 
-                      any(role.id in bypass_roles for role in ctx.author.roles))
+        is_bypassed = (str(ctx.author.id) in bypass_users or 
+                      any(str(role.id) in bypass_roles for role in ctx.author.roles))
         
         if is_bypassed:
             if exclude_ban and ctx.command.name in ["ban", "annihilate"]:
@@ -390,8 +390,6 @@ async def apply_interest_task():
     multiplier = 1 + rate / 100
     await db.apply_bank_interest(multiplier)
     print(f"  [ECONOMY] Hourly bank interest applied: {rate:.2f}% ({tier})")
-
-            print(f"  [ECONOMY] Loan overdue for {user_id}. Penalty applied.")
 
 # ══════════════════════════════════════════════
 #  TICKET SYSTEM UI
@@ -1461,10 +1459,10 @@ async def help_cmd(ctx: commands.Context, *sub: str):
         return
 
     _cfg = load_config()
-    _bypass_users = _cfg.get("BYPASS_USER_IDS", [])
-    _bypass_roles = _cfg.get("BYPASS_ROLE_IDS", [])
-    _is_bypassed = (ctx.author.id in _bypass_users or
-                    any(role.id in _bypass_roles for role in ctx.author.roles))
+    _bypass_users = [str(uid) for uid in _cfg.get("BYPASS_USER_IDS", [])]
+    _bypass_roles = [str(rid) for rid in _cfg.get("BYPASS_ROLE_IDS", [])]
+    _is_bypassed = (str(ctx.author.id) in _bypass_users or
+                    any(str(role.id) in _bypass_roles for role in ctx.author.roles))
     is_admin = (ctx.author.guild_permissions.administrator or
                 ctx.author.guild_permissions.manage_guild or
                 _is_bypassed)
