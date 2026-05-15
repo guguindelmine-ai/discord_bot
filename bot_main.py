@@ -3006,32 +3006,6 @@ async def set_swear_penalty_cmd(ctx: commands.Context, duration: str):
     await save_config_sync(cfg)
     await ctx.send(f"✅ Swear mute penalty set to **{format_duration(seconds)}**.")
 
-@bot.command(name="settier")
-@is_authorized()
-async def set_tier_cmd(ctx: commands.Context, clause: str, duration: str):
-    """Set duration for a punishment tier. Admin/Bypass only.
-    Usage: !settier 1.1 1h
-    """
-    from bot_functions import parse_duration, format_duration
-    seconds = parse_duration(duration)
-    minutes = seconds // 60
-    
-    cfg = load_config()
-    if "PUNISHMENT_TIERS" not in cfg:
-        cfg["PUNISHMENT_TIERS"] = {
-            "1.1": {"action": "mute", "duration": 10, "label": "Rule 1.1 (Minor)"},
-            "1.2": {"action": "mute", "duration": 30, "label": "Rule 1.2 (Standard)"},
-            "1.3": {"action": "mute", "duration": 60, "label": "Rule 1.3 (Serious)"},
-            "1.4": {"action": "quarantine", "duration": 1440, "label": "Rule 1.4 (Severe)"},
-            "1.5": {"action": "quarantine", "duration": 10080, "label": "Rule 1.5 (Critical)"}
-        }
-        
-    if clause not in cfg["PUNISHMENT_TIERS"]:
-        return await ctx.send(f"❌ Invalid tier clause. (e.g. 1.1, 1.2)")
-        
-    cfg["PUNISHMENT_TIERS"][clause]["duration"] = minutes
-    await save_config_sync(cfg)
-    await ctx.send(f"✅ Duration for tier **{clause}** set to **{format_duration(seconds)}**.")
 
 @bot.command(name="setcooldown")
 @is_authorized()
