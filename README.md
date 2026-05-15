@@ -50,13 +50,32 @@ A multi-purpose, high-performance Discord bot built with Python, `discord.py`, a
 
 ## 🚀 Setup & Installation
 
-### 1. Create a Discord Bot
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click **New Application** → name it **Paradox Bot**
-3. Go to **Bot** → enable **Privileged Intents**:
-   - ✅ Server Members Intent
-   - ✅ Message Content Intent
-4. **Copy the Token** and invite the bot with `Administrator` permissions.
+## 🚀 Deployment (Render.com)
+Paradox Bot is now optimized for **Render.com** hosting.
+
+1. **Environment Variables**:
+   - `DISCORD_TOKEN`: Your bot token from the Discord Developer Portal.
+   - `MONGO_URI`: Your MongoDB Atlas connection string.
+   - `PORT`: (Automatic) Set by Render, used for the keep-alive server.
+2. **Build Settings**:
+   - Runtime: `Python 3.13`
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `python bot_main.py`
+3. **Uptime**:
+   - Set up a monitor (e.g., UptimeRobot) to ping your Render URL every 5 minutes to prevent the bot from sleeping.
+
+## 🛡️ Moderation & Advanced Config
+We have added professional-grade tools for server management:
+
+- **`!viewconfig`**: Displays a comprehensive overview of all server rules, punishment tiers, and economy cooldowns.
+- **`!setbypass <@user/role>`**: Grants "Global Bypass" permissions, allowing trusted members to use restricted commands without limits.
+- **`!setgif <action> <url>`**: Customize the visual experience by changing GIFs for flavor commands like `!annihilate`.
+- **`!setcooldown <cmd> <time>`**: Dynamic control over economy command frequencies.
+- **`!settier <1.1-1.5> <time>`**: Granular control over the duration of rule-based punishments.
+
+## ⚙️ Interactive Setup
+The bot now features a built-in **📖 Setup Guide** directly in the `!help` menu. This guide provides a step-by-step walkthrough for configuring welcome messages, logs, and ticket systems.
+ with `Administrator` permissions.
 
 ### 2. Configure Local Settings
 Fill in your `config.json` (most settings can be configured via Discord commands later):
